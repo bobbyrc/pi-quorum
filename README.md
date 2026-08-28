@@ -35,7 +35,7 @@ Results are `consensus`, `qualified-consensus-with-dissent`, or `unresolved`. Qu
 
 ## Automatic final review
 
-When enabled, pi-quorum watches `agent_settled`, reviews all staged, unstaged, and untracked Git changes with the same read-only member boundary, and queues a provenance-labelled message containing every member's actionable findings. Large change sets are reviewed in bounded, exhaustive parts before their fingerprint is marked complete. Review is guarded against recursion: one review per diff fingerprint, no review while a review is running, and no review triggered by its own automatic follow-up. Quorum members only report findings; the main agent remains the sole writer.
+When enabled, pi-quorum watches `agent_settled`, reviews all staged, unstaged, and untracked Git changes with the same read-only member boundary, and queues a provenance-labelled message containing every member's actionable findings. Large change sets are reviewed in bounded, exhaustive parts before their fingerprint is marked complete. The UI shows review progress; Ctrl-C cancels an interactive review, and a ten-minute timeout bounds unattended work. Review is guarded against recursion and failure loops: one review per diff fingerprint, no review while a review is running, no review triggered by its own automatic follow-up, and a five-minute cooldown before retrying a failed change set. Quorum members only report findings; the main agent remains the sole writer.
 
 ## Configuration
 

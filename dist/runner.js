@@ -15,10 +15,12 @@ export function sessionSummary(ctx) {
         if (entry.type !== "message")
             return "";
         const message = entry.message;
-        const text = message.content
-            ?.filter((part) => part.type === "text")
-            .map((part) => part.text ?? "")
-            .join("\n") ?? "";
+        const text = typeof message.content === "string"
+            ? message.content
+            : (message.content
+                ?.filter((part) => part.type === "text")
+                .map((part) => part.text ?? "")
+                .join("\n") ?? "");
         return text ? `${message.role ?? "message"}: ${text}` : "";
     })
         .filter(Boolean)
@@ -26,6 +28,7 @@ export function sessionSummary(ctx) {
         .slice(-18_000);
 }
 export async function askReadOnlyMember(ctx, member, prompt, signal) {
+    signal?.throwIfAborted();
     const model = modelForMember(ctx, member);
     if (!model)
         throw new Error(`Configured quorum member is unavailable: ${member.modelKey}`);
@@ -57,11 +60,16 @@ export async function askReadOnlyMember(ctx, member, prompt, signal) {
             .map((part) => part.text)
             .join("\n");
     });
-    const abort = () => session.abort();
+    const abort = () => void session.abort();
     signal?.addEventListener("abort", abort, { once: true });
     try {
+        if (signal?.aborted) {
+            abort();
+            signal.throwIfAborted();
+        }
         await session.prompt(prompt);
         await session.agent.waitForIdle();
+        signal?.throwIfAborted();
         if (!finalText.trim())
             throw new Error(`${member.modelKey} returned no usable answer`);
         return finalText.slice(0, MAX_OUTPUT_CHARS);

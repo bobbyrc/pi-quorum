@@ -4,6 +4,9 @@ import { formatDecisionResult, formatReviewResults } from "./format.js";
 import { deliberate } from "./quorum.js";
 import { collectGitChanges, splitDiffForReview } from "./review.js";
 const POLICY = `## Quorum policy\nUse quorum for material architecture, API, security, reliability, cost, data, dependency, and irreversible decisions. Batch related decisions in one quorum call. Quorum members are advisory-only and never perform implementation work. For unresolved outcomes, use the returned selectable options and wait for the user's choice before continuing.`;
+const REVIEW_TIMEOUT_MS = 10 * 60_000;
+const REVIEW_FAILURE_RETRY_MS = 5 * 60_000;
+const REVIEW_STATUS_KEY = "pi-quorum-review";
 const DecisionSchema = Type.Object({
     id: Type.String({
         description: "Stable identifier for this decision in a batch",
@@ -28,7 +31,7 @@ function configStatus(config) {
         : "none";
     return `Members: ${members}\nContext: ${config.contextMode}\nDecision rounds: ${config.maxRounds}\nReview: ${config.review.enabled ? `on (${config.review.maxRounds} round${config.review.maxRounds === 1 ? "" : "s"})` : "off"}`;
 }
-async function chooseConfig(ctx) {
+export async function chooseConfig(ctx) {
     const available = (ctx.scopedModels.length
         ? ctx.scopedModels.map((item) => item.model)
         : ctx.modelRegistry.getAvailable())
@@ -57,18 +60,26 @@ async function chooseConfig(ctx) {
         "Fresh request only",
         "Bounded session summary",
     ]);
+    if (!contextChoice)
+        return undefined;
     const roundsChoice = await ctx.ui.select("Maximum decision rounds:", [
         "1",
         "2",
         "3",
     ]);
+    if (!roundsChoice)
+        return undefined;
     const reviewChoice = await ctx.ui.select("Automatic final review:", [
         "Off",
         "On — prompt the main agent to address findings",
     ]);
+    if (!reviewChoice)
+        return undefined;
     const reviewRounds = reviewChoice?.startsWith("On")
         ? await ctx.ui.select("Maximum review rounds:", ["1", "2", "3"])
         : "1";
+    if (!reviewRounds)
+        return undefined;
     return {
         members,
         contextMode: contextChoice === "Bounded session summary" ? "session-summary" : "fresh",
@@ -96,6 +107,15 @@ export default function quorumExtension(pi) {
     let reviewInFlight = false;
     let automaticFixPending = false;
     let lastReviewedFingerprint = "";
+    let activeReviewController;
+    let warnedInvalidReviewConfig = false;
+    let failedReview;
+    const abortActiveReview = (message) => {
+        activeReviewController?.abort(new DOMException(message, "AbortError"));
+    };
+    pi.on("session_shutdown", () => abortActiveReview("Session shut down"));
+    pi.on("session_before_switch", () => abortActiveReview("Session switched"));
+    pi.on("session_before_fork", () => abortActiveReview("Session forked"));
     pi.on("before_agent_start", (event) => ({
         systemPrompt: `${event.systemPrompt}\n\n${POLICY}`,
     }));
@@ -114,8 +134,10 @@ export default function quorumExtension(pi) {
             if (config.members.length < 2)
                 throw new Error("Quorum is not configured. Ask the user to run /quorum configure.");
             const results = [];
-            for (const request of params.decisions)
+            for (const request of params.decisions) {
+                signal?.throwIfAborted();
                 results.push(await selectUnresolved(ctx, await deliberate(ctx, config, request, signal)));
+            }
             return {
                 content: [
                     {
@@ -147,6 +169,14 @@ export default function quorumExtension(pi) {
         const config = await loadConfig();
         if (!config.review.enabled || reviewInFlight)
             return;
+        if (config.members.length < 2) {
+            if (!warnedInvalidReviewConfig) {
+                ctx.ui.notify("Automatic quorum review is disabled until at least two valid members are configured with /quorum configure.", "error");
+                warnedInvalidReviewConfig = true;
+            }
+            return;
+        }
+        warnedInvalidReviewConfig = false;
         if (automaticFixPending) {
             automaticFixPending = false;
             lastReviewedFingerprint = (await collectGitChanges(pi)).fingerprint;
@@ -155,18 +185,46 @@ export default function quorumExtension(pi) {
         const changes = await collectGitChanges(pi);
         if (!changes.patch || changes.fingerprint === lastReviewedFingerprint)
             return;
+        if (failedReview?.fingerprint === changes.fingerprint &&
+            Date.now() < failedReview.retryAfter)
+            return;
         reviewInFlight = true;
+        const reviewController = new AbortController();
+        let reviewTimedOut = false;
+        const canCancelInteractively = ctx.mode === "tui";
+        activeReviewController = reviewController;
+        const timeout = setTimeout(() => {
+            reviewTimedOut = true;
+            reviewController.abort(new DOMException("Automatic quorum review timed out", "AbortError"));
+        }, REVIEW_TIMEOUT_MS);
+        const stopListening = canCancelInteractively
+            ? ctx.ui.onTerminalInput((data) => {
+                if (data !== "\u0003")
+                    return undefined;
+                reviewController.abort(new DOMException("Automatic quorum review cancelled", "AbortError"));
+                return { consume: true };
+            })
+            : () => undefined;
+        ctx.ui.setStatus(REVIEW_STATUS_KEY, canCancelInteractively
+            ? "reviewing changes (Ctrl-C to cancel)"
+            : "reviewing changes");
+        ctx.ui.notify(canCancelInteractively
+            ? "Automatic quorum review started. Press Ctrl-C to cancel."
+            : "Automatic quorum review started.", "info");
         try {
             const parts = splitDiffForReview(changes.patch);
             const results = [];
             for (const [index, part] of parts.entries()) {
+                reviewController.signal.throwIfAborted();
+                ctx.ui.setStatus(REVIEW_STATUS_KEY, `reviewing changes ${index + 1}/${parts.length}${canCancelInteractively ? " (Ctrl-C to cancel)" : ""}`);
                 results.push(await deliberate(ctx, { ...config, maxRounds: config.review.maxRounds }, {
                     id: `final-code-review-${index + 1}`,
                     question: `Review diff part ${index + 1} of ${parts.length} for correctness, regressions, security, and missing tests. Return only actionable findings ranked by severity; do not modify anything. If there are no findings, say so explicitly.`,
                     context: part,
-                }));
+                }, reviewController.signal));
             }
             lastReviewedFingerprint = changes.fingerprint;
+            failedReview = undefined;
             automaticFixPending = config.review.autoPromptFixes;
             pi.sendMessage({
                 customType: "pi-quorum-review",
@@ -179,7 +237,38 @@ export default function quorumExtension(pi) {
                 },
             }, { triggerTurn: config.review.autoPromptFixes, deliverAs: "followUp" });
         }
+        catch (error) {
+            if (reviewController.signal.aborted) {
+                if (reviewTimedOut) {
+                    failedReview = {
+                        fingerprint: changes.fingerprint,
+                        retryAfter: Date.now() + REVIEW_FAILURE_RETRY_MS,
+                    };
+                }
+                else {
+                    lastReviewedFingerprint = changes.fingerprint;
+                }
+                const reason = reviewController.signal.reason;
+                ctx.ui.notify(reason instanceof Error
+                    ? reason.message
+                    : reviewTimedOut
+                        ? "Automatic quorum review timed out."
+                        : "Automatic quorum review cancelled.", "warning");
+                return;
+            }
+            failedReview = {
+                fingerprint: changes.fingerprint,
+                retryAfter: Date.now() + REVIEW_FAILURE_RETRY_MS,
+            };
+            ctx.ui.notify("Automatic quorum review failed. The same change set will not be retried for five minutes.", "error");
+            throw error;
+        }
         finally {
+            clearTimeout(timeout);
+            stopListening();
+            ctx.ui.setStatus(REVIEW_STATUS_KEY, undefined);
+            if (activeReviewController === reviewController)
+                activeReviewController = undefined;
             reviewInFlight = false;
         }
     });

@@ -144,7 +144,10 @@ export async function deliberate(ctx, config, request, signal, dependencies = DE
     const evidence = config.contextMode === "session-summary"
         ? dependencies.summarizeSession(ctx)
         : "";
-    const runRound = async (peerReports) => Promise.all(config.members.map(async (member) => parseMemberReport(member.modelKey, await dependencies.askMember(ctx, member, promptFor(request, evidence, peerReports), signal))));
+    const runRound = async (peerReports) => {
+        signal?.throwIfAborted();
+        return Promise.all(config.members.map(async (member) => parseMemberReport(member.modelKey, await dependencies.askMember(ctx, member, promptFor(request, evidence, peerReports), signal))));
+    };
     let reports = await runRound();
     for (let round = 2; round <= config.maxRounds && materiallyDisagree(reports); round += 1) {
         reports = await runRound(reports);

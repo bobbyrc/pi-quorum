@@ -125,3 +125,62 @@ test("honors a three-round cap while disagreement remains", async () => {
   assert.equal(calls, 6);
   assert.equal(result.outcome, "unresolved");
 });
+
+test("does not start a round when the signal is already aborted", async () => {
+  let calls = 0;
+  await assert.rejects(
+    deliberate(
+      {} as ExtensionContext,
+      {
+        members: [{ modelKey: "one/model" }, { modelKey: "two/model" }],
+        contextMode: "fresh",
+        maxRounds: 2,
+        review: { enabled: false, maxRounds: 1, autoPromptFixes: true },
+      },
+      request,
+      AbortSignal.abort(),
+      {
+        askMember: async () => {
+          calls += 1;
+          throw new Error("must not run");
+        },
+        summarizeSession: () => "",
+      },
+    ),
+    { name: "AbortError" },
+  );
+  assert.equal(calls, 0);
+});
+
+test("does not launch another round after cancellation", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  await assert.rejects(
+    deliberate(
+      {} as ExtensionContext,
+      {
+        members: [{ modelKey: "one/model" }, { modelKey: "two/model" }],
+        contextMode: "fresh",
+        maxRounds: 3,
+        review: { enabled: false, maxRounds: 1, autoPromptFixes: true },
+      },
+      request,
+      controller.signal,
+      {
+        askMember: async (_ctx, member) => {
+          calls += 1;
+          if (calls === 2) controller.abort();
+          const recommendation =
+            member.modelKey === "one/model" ? "Choose A" : "Choose B";
+          return JSON.stringify({
+            recommendation,
+            rationale: `${recommendation} rationale`,
+          });
+        },
+        summarizeSession: () => "",
+      },
+    ),
+    { name: "AbortError" },
+  );
+  assert.equal(calls, 2);
+});

@@ -32,13 +32,15 @@ export function sessionSummary(ctx: ExtensionContext): string {
       if (entry.type !== "message") return "";
       const message = entry.message as {
         role?: string;
-        content?: Array<{ type?: string; text?: string }>;
+        content?: string | Array<{ type?: string; text?: string }>;
       };
       const text =
-        message.content
-          ?.filter((part) => part.type === "text")
-          .map((part) => part.text ?? "")
-          .join("\n") ?? "";
+        typeof message.content === "string"
+          ? message.content
+          : (message.content
+              ?.filter((part) => part.type === "text")
+              .map((part) => part.text ?? "")
+              .join("\n") ?? "");
       return text ? `${message.role ?? "message"}: ${text}` : "";
     })
     .filter(Boolean)
@@ -52,6 +54,7 @@ export async function askReadOnlyMember(
   prompt: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  signal?.throwIfAborted();
   const model = modelForMember(ctx, member);
   if (!model)
     throw new Error(
@@ -87,11 +90,16 @@ export async function askReadOnlyMember(
       .map((part) => part.text)
       .join("\n");
   });
-  const abort = () => session.abort();
+  const abort = () => void session.abort();
   signal?.addEventListener("abort", abort, { once: true });
   try {
+    if (signal?.aborted) {
+      abort();
+      signal.throwIfAborted();
+    }
     await session.prompt(prompt);
     await session.agent.waitForIdle();
+    signal?.throwIfAborted();
     if (!finalText.trim())
       throw new Error(`${member.modelKey} returned no usable answer`);
     return finalText.slice(0, MAX_OUTPUT_CHARS);

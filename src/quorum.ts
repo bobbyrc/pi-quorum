@@ -216,8 +216,9 @@ export async function deliberate(
     config.contextMode === "session-summary"
       ? dependencies.summarizeSession(ctx)
       : "";
-  const runRound = async (peerReports?: MemberReport[]) =>
-    Promise.all(
+  const runRound = async (peerReports?: MemberReport[]) => {
+    signal?.throwIfAborted();
+    return Promise.all(
       config.members.map(async (member) =>
         parseMemberReport(
           member.modelKey,
@@ -230,6 +231,7 @@ export async function deliberate(
         ),
       ),
     );
+  };
   let reports = await runRound();
   for (
     let round = 2;
