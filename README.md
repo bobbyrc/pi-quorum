@@ -184,7 +184,22 @@ pi install /path/to/pi-quorum
 
 ## Publishing
 
-Publish releases with `npm publish`. The publish lifecycle type-checks, builds, and tests the extension before packaging it. The `pi-package` keyword makes published releases automatically discoverable in the [pi.dev extension catalog](https://pi.dev/packages?type=extension).
+Published GitHub Releases are delivered to npm by `.github/workflows/publish.yml` using npm Trusted Publishing. The workflow verifies that the release tag matches `package.json`, requires the tagged commit to be on `main`, runs the coverage gates, verifies the committed build, and publishes without a long-lived npm token. Stable releases use npm’s `latest` tag; GitHub prereleases use `next` and require a prerelease package version such as `0.2.0-beta.1`.
+
+Configure the npm package’s **Settings → Trusted Publisher** once:
+
+| Field | Value |
+| --- | --- |
+| Provider | GitHub Actions |
+| Organization or user | `bobbyrc` |
+| Repository | `pi-quorum` |
+| Workflow filename | `publish.yml` |
+| Environment | Leave blank |
+| Allowed action | `npm publish` |
+
+To make a stable release, update and commit both `package.json` and `package-lock.json`, push that commit to `main`, then publish a GitHub Release tagged with the matching `v`-prefixed version—for example, package version `0.2.0` uses tag `v0.2.0`. Creating or pushing a tag without publishing a GitHub Release does not trigger this workflow.
+
+Trusted Publishing automatically adds npm provenance for public packages built from this public repository. The `pi-package` keyword makes each published version automatically discoverable in the [pi.dev extension catalog](https://pi.dev/packages?type=extension).
 
 ## License
 
