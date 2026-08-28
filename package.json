@@ -1,0 +1,33 @@
+{
+  "name": "pi-quorum",
+  "version": "0.1.0",
+  "description": "A native pi.dev extension for bounded multi-model deliberation and read-only code review.",
+  "keywords": ["pi-package", "pi.dev", "deliberation", "code-review"],
+  "type": "module",
+  "files": ["dist", "!dist/**/*.test.*", "README.md", "LICENSE"],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "pi": {
+    "extensions": ["./dist/index.js"]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/**/*.test.js",
+    "test:coverage": "npm run build && node --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=90 --test dist/**/*.test.js"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.84.3",
+    "@earendil-works/pi-coding-agent": "^0.84.3",
+    "@earendil-works/pi-tui": "^0.84.3",
+    "@types/node": "^22.0.0",
+    "typebox": "^1.0.14",
+    "typescript": "^5.8.3"
+  }
+}
