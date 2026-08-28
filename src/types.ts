@@ -36,6 +36,7 @@ export interface MemberReport {
   recommendation: string;
   rationale: string;
   risks: string[];
+  dissent: string[];
   options: DeliberationOption[];
   confidence: "high" | "medium" | "low";
 }

@@ -4,7 +4,9 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadConfig, saveConfig } from "./config.js";
+import { formatDecisionResult, formatReviewResults } from "./format.js";
 import { deliberate } from "./quorum.js";
+import { collectGitChanges, splitDiffForReview } from "./review.js";
 import type { DecisionRequest, DecisionResult, QuorumConfig } from "./types.js";
 
 const POLICY = `## Quorum policy\nUse quorum for material architecture, API, security, reliability, cost, data, dependency, and irreversible decisions. Batch related decisions in one quorum call. Quorum members are advisory-only and never perform implementation work. For unresolved outcomes, use the returned selectable options and wait for the user's choice before continuing.`;
@@ -128,19 +130,10 @@ async function selectUnresolved(
   return result;
 }
 
-async function diffFingerprint(pi: ExtensionAPI): Promise<string> {
-  const result = await pi.exec(
-    "git",
-    ["diff", "--no-ext-diff", "--unified=3"],
-    {},
-  );
-  return result.code === 0 ? result.stdout : "";
-}
-
 export default function quorumExtension(pi: ExtensionAPI): void {
   let reviewInFlight = false;
   let automaticFixPending = false;
-  let lastReviewedDiff = "";
+  let lastReviewedFingerprint = "";
 
   pi.on("before_agent_start", (event) => ({
     systemPrompt: `${event.systemPrompt}\n\n${POLICY}`,
@@ -177,10 +170,7 @@ export default function quorumExtension(pi: ExtensionAPI): void {
           {
             type: "text",
             text: results
-              .map(
-                (result) =>
-                  `${result.request.id}: ${result.outcome}\n${result.recommendation}${result.selectedOptionId ? `\nUser selected: ${result.selectedOptionId}` : ""}`,
-              )
+              .map(formatDecisionResult)
               .join("\n\n"),
           },
         ],
@@ -209,31 +199,41 @@ export default function quorumExtension(pi: ExtensionAPI): void {
     if (!config.review.enabled || reviewInFlight) return;
     if (automaticFixPending) {
       automaticFixPending = false;
-      lastReviewedDiff = await diffFingerprint(pi);
+      lastReviewedFingerprint = (await collectGitChanges(pi)).fingerprint;
       return;
     }
-    const diff = await diffFingerprint(pi);
-    if (!diff || diff === lastReviewedDiff) return;
+    const changes = await collectGitChanges(pi);
+    if (!changes.patch || changes.fingerprint === lastReviewedFingerprint)
+      return;
     reviewInFlight = true;
     try {
-      const result = await deliberate(
-        ctx,
-        { ...config, maxRounds: config.review.maxRounds },
-        {
-          id: "final-code-review",
-          question:
-            "Review the supplied diff for correctness, regressions, security, and missing tests. Return only actionable findings ranked by severity; do not modify anything.",
-          context: diff.slice(0, 24_000),
-        },
-      );
-      lastReviewedDiff = diff;
+      const parts = splitDiffForReview(changes.patch);
+      const results: DecisionResult[] = [];
+      for (const [index, part] of parts.entries()) {
+        results.push(
+          await deliberate(
+            ctx,
+            { ...config, maxRounds: config.review.maxRounds },
+            {
+              id: `final-code-review-${index + 1}`,
+              question: `Review diff part ${index + 1} of ${parts.length} for correctness, regressions, security, and missing tests. Return only actionable findings ranked by severity; do not modify anything. If there are no findings, say so explicitly.`,
+              context: part,
+            },
+          ),
+        );
+      }
+      lastReviewedFingerprint = changes.fingerprint;
       automaticFixPending = config.review.autoPromptFixes;
       pi.sendMessage(
         {
           customType: "pi-quorum-review",
-          content: `Read-only quorum code review (${result.outcome}):\n${result.recommendation}\n${result.rationale}\n\nAddress every actionable finding now. Do not invoke another review in response to this message.`,
+          content: formatReviewResults(results),
           display: true,
-          details: { result, provenance: "pi-quorum-auto-review" },
+          details: {
+            results,
+            fingerprint: changes.fingerprint,
+            provenance: "pi-quorum-auto-review",
+          },
         },
         { triggerTurn: config.review.autoPromptFixes, deliverAs: "followUp" },
       );

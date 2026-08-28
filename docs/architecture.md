@@ -17,10 +17,10 @@ They also agreed that `agent_settled` is the appropriate post-work boundary and 
 `pi-quorum` is a distributable pi package exposing `quorum()` and `/quorum configure`.
 
 1. **Member isolation:** each member receives an in-memory `createAgentSession` with only `read`, `grep`, `find`, and `ls`; no extensions, skills, prompt templates, themes, or inherited context files.
-2. **Decision protocol:** a batch is capped at eight decisions. Members make independent first-pass reports; a bounded second/third round supplies peer reports only when recommendations materially differ. Outcomes never re-label disagreement as consensus.
+2. **Decision protocol:** a batch is capped at eight decisions. Members make independent first-pass reports; a bounded second/third round supplies peer reports only while recommendations or explicit dissent materially differ. Consensus requires a substantive recommendation from every member; explicit reservations produce qualified consensus rather than being erased.
 3. **Context:** configuration exposes `fresh` and bounded `session-summary` modes. Only the latter shares a truncated, recent session snapshot.
 4. **User resolution:** unresolved outcomes return fleshed-out options. In interactive Pi sessions the user selects an option; headless sessions receive the options without a default choice.
-5. **Review:** optional review uses the same read-only boundary at `agent_settled`. It sends a provenance-labelled, queued instruction for the main agent to address findings. A diff fingerprint, in-flight flag, and automatic-follow-up suppression prevent review loops.
+5. **Review:** optional review uses the same read-only boundary at `agent_settled`. It collects staged, unstaged, and untracked changes, reviews every bounded diff part, and sends the full member reports in a provenance-labelled queued instruction. A completed-change-set fingerprint, in-flight flag, and automatic-follow-up suppression prevent review loops.
 6. **Policy:** the extension retains a short `before_agent_start` policy that requires quorum for material decisions, while detailed mechanics live in the tool guidance.
 
 ## Migration note

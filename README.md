@@ -31,11 +31,11 @@ Call `quorum` with one decision or a batch of related decisions:
 
 Each configured member runs in a new, in-memory Pi session with only `read`, `grep`, `find`, and `ls`. Members never receive write, edit, shell, extensions, skills, or inherited context-file capabilities. Their outputs are independent in round one; when they materially disagree, later rounds receive curated peer reports. The extension never treats a majority as consensus.
 
-Results are `consensus`, `qualified-consensus-with-dissent`, or `unresolved`. An unresolved interactive result displays fleshed-out selectable directions (rationale, trade-offs, risks, and prerequisites); headless modes receive the same structured options without choosing a default.
+Results are `consensus`, `qualified-consensus-with-dissent`, or `unresolved`. Qualified consensus means every member supports the same direction while at least one retains an explicit material reservation. An unresolved interactive result displays fleshed-out selectable directions (rationale, trade-offs, risks, and prerequisites); headless modes receive the same structured options without choosing a default.
 
 ## Automatic final review
 
-When enabled, pi-quorum watches `agent_settled`, reviews a new Git diff with the same read-only member boundary, and queues a provenance-labelled message instructing the main agent to address actionable findings. It is guarded against recursion: one review per diff fingerprint, no review while a review is running, and no review triggered by its own automatic follow-up. Quorum members only report findings; the main agent remains the sole writer.
+When enabled, pi-quorum watches `agent_settled`, reviews all staged, unstaged, and untracked Git changes with the same read-only member boundary, and queues a provenance-labelled message containing every member's actionable findings. Large change sets are reviewed in bounded, exhaustive parts before their fingerprint is marked complete. Review is guarded against recursion: one review per diff fingerprint, no review while a review is running, and no review triggered by its own automatic follow-up. Quorum members only report findings; the main agent remains the sole writer.
 
 ## Configuration
 
