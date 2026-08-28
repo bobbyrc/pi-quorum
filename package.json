@@ -1,8 +1,25 @@
 {
   "name": "pi-quorum",
   "version": "0.1.0",
-  "description": "A native pi.dev extension for bounded multi-model deliberation and read-only code review.",
-  "keywords": ["pi-package", "pi.dev", "deliberation", "code-review"],
+  "description": "A read-only, multi-model decision quorum and final code reviewer for Pi.",
+  "keywords": [
+    "pi-package",
+    "pi.dev",
+    "pi-extension",
+    "deliberation",
+    "code-review",
+    "multi-model"
+  ],
+  "author": "Bobby Craig",
+  "license": "MIT",
+  "homepage": "https://github.com/bobbyrc/pi-quorum#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bobbyrc/pi-quorum.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bobbyrc/pi-quorum/issues"
+  },
   "type": "module",
   "files": ["dist", "!dist/**/*.test.*", "README.md", "LICENSE"],
   "main": "dist/index.js",
@@ -14,7 +31,11 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/**/*.test.js",
-    "test:coverage": "npm run build && node --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=90 --test dist/**/*.test.js"
+    "test:coverage": "npm run build && node --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=90 --test dist/**/*.test.js",
+    "prepack": "npm run check && npm test"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

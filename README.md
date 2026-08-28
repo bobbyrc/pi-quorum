@@ -1,46 +1,191 @@
 # pi-quorum
 
-A native [pi.dev](https://pi.dev) extension for bounded multi-model deliberation and read-only final code review.
+**Independent model perspectives for decisions that matter—without giving the reviewers permission to change your code.**
 
-## Install
+`pi-quorum` is a native [Pi](https://pi.dev) extension for bounded, multi-model deliberation. It asks 2–4 models to evaluate a decision independently, lets them challenge material disagreement within a strict round limit, and returns either a shared direction or a clear set of choices for you.
+
+It can also review the complete Git change set through the same read-only boundary. Quorum members advise; your main Pi agent remains the only writer.
+
+## Quick start
+
+You need at least two models available in Pi.
 
 ```bash
-pi install /path/to/pi-quorum
+pi install npm:pi-quorum
 ```
 
-Then configure it in Pi:
+Open Pi and run the configuration wizard:
 
 ```text
 /quorum configure
 ```
 
-The wizard discovers authenticated (or session-scoped) models, selects 2–4 members, chooses fresh versus bounded-session context, sets the decision round cap (1–3), and optionally enables automatic final review.
+Choose 2–4 models, how much conversation context they may receive, a 1–3 round limit, and whether to run automatic final reviews.
 
-## `quorum()`
+Then work normally. Pi is reminded to use quorum for material decisions, or you can ask explicitly:
 
-Call `quorum` with one decision or a batch of related decisions:
+```text
+Use quorum before choosing the storage architecture for this feature.
+```
+
+That is all you need to get started.
+
+## When quorum helps
+
+Use it when a decision is expensive to reverse or benefits from genuinely different perspectives:
+
+- Architecture and system boundaries
+- Public APIs and compatibility promises
+- Security, privacy, and reliability choices
+- Data models, migrations, and retention
+- Dependencies, infrastructure, and ongoing cost
+- Trade-offs where the “best” answer depends on risk tolerance
+
+Skip it for routine edits, formatting, obvious bug fixes, and low-impact naming choices. Quorum is deliberately bounded so that better judgment does not turn into endless debate.
+
+## How it works
+
+1. The main agent sends one decision—or a batch of up to eight related decisions—to `quorum`.
+2. Every configured member evaluates it independently in a new, in-memory Pi session.
+3. If the recommendations materially differ or include explicit dissent, members receive the peer reports for critique rather than deference, up to the configured round limit.
+4. The extension preserves each member report and classifies the result without using a majority-vote shortcut.
+
+For an unresolved decision, Pi presents concrete options with rationale, trade-offs, risks, and prerequisites. In an interactive session, you choose the direction. In a headless session, the same structured options are returned without silently choosing a default.
+
+### What the result means
+
+| Outcome | Meaning |
+| --- | --- |
+| `consensus` | Every member supports the same direction without a material reservation. |
+| `qualified-consensus-with-dissent` | Every member supports the same direction, but at least one retains an explicit reservation. |
+| `unresolved` | The members still recommend materially different directions. The decision returns to you with viable options. |
+
+Two models agreeing does not erase a material objection from a third.
+
+## Example decision
+
+You can simply ask Pi to consult the quorum:
+
+```text
+We need a durable job queue for a single-node deployment. Use quorum to decide
+between SQLite, Postgres, and an embedded queue before implementing anything.
+```
+
+The agent-facing tool can also batch related questions so members consider them together:
 
 ```json
 {
   "decisions": [
-    { "id": "storage", "question": "Should we use SQLite or Postgres for the local cache?" },
-    { "id": "retention", "question": "How long should cache entries be retained?" }
+    {
+      "id": "storage",
+      "question": "Should the local cache use SQLite or Postgres?",
+      "context": "The service runs on one host today but may become multi-region next year."
+    },
+    {
+      "id": "retention",
+      "question": "How long should cache entries be retained?"
+    }
   ]
 }
 ```
 
-Each configured member runs in a new, in-memory Pi session with only `read`, `grep`, `find`, and `ls`. Members never receive write, edit, shell, extensions, skills, or inherited context-file capabilities. Their outputs are independent in round one; when they materially disagree, later rounds receive curated peer reports. The extension never treats a majority as consensus.
+Decision-specific `context` is optional. Omit it when you want the members to form a fresher view from the question and repository alone.
 
-Results are `consensus`, `qualified-consensus-with-dissent`, or `unresolved`. Qualified consensus means every member supports the same direction while at least one retains an explicit material reservation. An unresolved interactive result displays fleshed-out selectable directions (rationale, trade-offs, risks, and prerequisites); headless modes receive the same structured options without choosing a default.
+## The read-only boundary
+
+Each member gets a purpose-built session with a small capability set:
+
+| Capability | Quorum member access |
+| --- | --- |
+| Inspect files | `read`, `grep`, `find`, and `ls` only |
+| Edit files or run shell commands | No |
+| Load extensions, skills, prompts, or themes | No |
+| Inherit project context files | No |
+| Persist its session | No—in-memory only |
+| See the main conversation | Only in bounded-summary mode |
+
+The restriction is enforced through the tools and resources given to each child session, not just through prompt wording. It is a capability boundary, not a general-purpose operating-system sandbox; as with any Pi extension, install only code you trust.
+
+## Context modes
+
+The setup wizard offers two modes:
+
+| Mode | What members receive |
+| --- | --- |
+| **Fresh request only** | The decision, any decision-specific context, and read-only repository tools. Main-session conversation history is excluded. |
+| **Bounded session summary** | Everything above, plus a truncated snapshot of recent text from the main session. |
+
+Fresh mode is the strongest defense against anchoring and inherited assumptions. Bounded-summary mode is useful when the trade-off depends on discoveries already made during a long session.
 
 ## Automatic final review
 
-When enabled, pi-quorum watches `agent_settled`, reviews all staged, unstaged, and untracked Git changes with the same read-only member boundary, and queues a provenance-labelled message containing every member's actionable findings. Large change sets are reviewed in bounded, exhaustive parts before their fingerprint is marked complete. The UI shows review progress; Ctrl-C cancels an interactive review, and a ten-minute timeout bounds unattended work. Review is guarded against recursion and failure loops: one review per diff fingerprint, no review while a review is running, no review triggered by its own automatic follow-up, and a five-minute cooldown before retrying a failed change set. Quorum members only report findings; the main agent remains the sole writer.
+Turn on automatic review in `/quorum configure` to have the same members examine new work when the main agent settles.
 
-## Configuration
+The review:
 
-Configuration is saved at `$XDG_CONFIG_HOME/pi-quorum/config.json` (or `~/.config/pi-quorum/config.json`) with owner-only permissions. Saved model identifiers are checked when quorum is called; unavailable members fail clearly so the user can reconfigure.
+- Includes staged, unstaged, and untracked Git changes
+- Looks for correctness issues, regressions, security risks, and missing tests
+- Splits large change sets into bounded parts and reviews every part
+- Shows progress and lets interactive users cancel with `Ctrl-C`
+- Stops after ten minutes and waits five minutes before retrying a failed change set
+- Sends a clearly labelled result to the main agent and prompts it to address actionable findings
+- Deduplicates identical change sets and suppresses review-triggered review loops
 
-## Deliberation policy
+Reviewers never apply fixes themselves. The main agent receives every member’s findings and remains responsible for evaluating and editing the code. A change-set fingerprint is marked complete only after every part has been reviewed.
 
-The extension adds a short policy reminder to use quorum for material architecture, API, security, reliability, cost, data, dependency, and irreversible decisions. It intentionally does not block ordinary work or make members implementation-capable.
+Automatic review requires a Git worktree with at least one staged, unstaged, or untracked change.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `/quorum configure` | Select members, context mode, round limits, and review settings |
+| `/quorum` | Show the current configuration |
+| `/quorum status` | Show the current configuration explicitly |
+
+Configuration is stored at `$XDG_CONFIG_HOME/pi-quorum/config.json`, or `~/.config/pi-quorum/config.json` when `XDG_CONFIG_HOME` is not set. The directory and file are created with owner-only permissions.
+
+If a saved model is no longer available, run `/quorum configure` again and choose from the models currently authenticated or scoped to the session.
+
+## Cost and latency
+
+Each decision calls every configured member once per round. Deliberation stops early when the reports no longer materially disagree; otherwise it continues up to the configured limit. Batched decisions are processed one at a time.
+
+Automatic review uses its own round limit for each bounded part of the change set. For a good default, start with two complementary models and two decision rounds. Add more members or rounds when the decision justifies the extra time and tokens.
+
+## Design principles
+
+- **Independence first:** members answer separately before seeing peer reports.
+- **Disagreement is useful:** reservations and unresolved trade-offs remain visible.
+- **Least authority:** advisors can inspect, but cannot implement.
+- **Bounded effort:** a small member count and round cap keep deliberation proportional.
+- **One writer:** only the main agent acts on the result.
+
+## Development
+
+Build and test a local checkout:
+
+```bash
+npm install
+npm test
+```
+
+Run the coverage thresholds used by CI:
+
+```bash
+npm run test:coverage
+```
+
+Load the checkout into Pi directly:
+
+```bash
+pi install /path/to/pi-quorum
+```
+
+## Publishing
+
+Publish releases with `npm publish`. The publish lifecycle type-checks, builds, and tests the extension before packaging it. The `pi-package` keyword makes published releases automatically discoverable in the [pi.dev extension catalog](https://pi.dev/packages?type=extension).
+
+## License
+
+[MIT](LICENSE)
