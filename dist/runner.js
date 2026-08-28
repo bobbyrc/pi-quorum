@@ -1,6 +1,12 @@
 import { DefaultResourceLoader, createAgentSession, getAgentDir, SessionManager, } from "@earendil-works/pi-coding-agent";
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 const MAX_OUTPUT_CHARS = 24_000;
+const DEFAULT_DEPENDENCIES = {
+    createLoader: (options) => new DefaultResourceLoader(options),
+    createSession: createAgentSession,
+    getAgentDirectory: getAgentDir,
+    createSessionManager: () => SessionManager.inMemory(),
+};
 export function modelForMember(ctx, member) {
     const slash = member.modelKey.indexOf("/");
     return slash > 0
@@ -27,14 +33,14 @@ export function sessionSummary(ctx) {
         .join("\n\n")
         .slice(-18_000);
 }
-export async function askReadOnlyMember(ctx, member, prompt, signal) {
+export async function askReadOnlyMember(ctx, member, prompt, signal, dependencies = DEFAULT_DEPENDENCIES) {
     signal?.throwIfAborted();
     const model = modelForMember(ctx, member);
     if (!model)
         throw new Error(`Configured quorum member is unavailable: ${member.modelKey}`);
-    const loader = new DefaultResourceLoader({
+    const loader = dependencies.createLoader({
         cwd: ctx.cwd,
-        agentDir: getAgentDir(),
+        agentDir: dependencies.getAgentDirectory(),
         noExtensions: true,
         noSkills: true,
         noPromptTemplates: true,
@@ -43,12 +49,12 @@ export async function askReadOnlyMember(ctx, member, prompt, signal) {
         systemPrompt: "You are a read-only quorum member. Analyze only the supplied question and evidence. Never make changes, invoke tools that alter state, or give implementation instructions. Return only the requested JSON.",
     });
     await loader.reload();
-    const { session } = await createAgentSession({
+    const { session } = await dependencies.createSession({
         cwd: ctx.cwd,
         model,
         thinkingLevel: member.thinking,
         tools: READ_ONLY_TOOLS,
-        sessionManager: SessionManager.inMemory(),
+        sessionManager: dependencies.createSessionManager(),
         resourceLoader: loader,
     });
     let finalText = "";

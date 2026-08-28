@@ -14,6 +14,24 @@ const REVIEW_TIMEOUT_MS = 10 * 60_000;
 const REVIEW_FAILURE_RETRY_MS = 5 * 60_000;
 const REVIEW_STATUS_KEY = "pi-quorum-review";
 
+export interface QuorumExtensionDependencies {
+  deliberateDecision: typeof deliberate;
+  collectChanges: typeof collectGitChanges;
+  splitDiff: typeof splitDiffForReview;
+  now: () => number;
+  reviewTimeoutMs: number;
+  reviewFailureRetryMs: number;
+}
+
+const DEFAULT_DEPENDENCIES: QuorumExtensionDependencies = {
+  deliberateDecision: deliberate,
+  collectChanges: collectGitChanges,
+  splitDiff: splitDiffForReview,
+  now: Date.now,
+  reviewTimeoutMs: REVIEW_TIMEOUT_MS,
+  reviewFailureRetryMs: REVIEW_FAILURE_RETRY_MS,
+};
+
 const DecisionSchema = Type.Object({
   id: Type.String({
     description: "Stable identifier for this decision in a batch",
@@ -137,7 +155,10 @@ async function selectUnresolved(
   return result;
 }
 
-export default function quorumExtension(pi: ExtensionAPI): void {
+export default function quorumExtension(
+  pi: ExtensionAPI,
+  dependencies: QuorumExtensionDependencies = DEFAULT_DEPENDENCIES,
+): void {
   let reviewInFlight = false;
   let automaticFixPending = false;
   let lastReviewedFingerprint = "";
@@ -183,7 +204,12 @@ export default function quorumExtension(pi: ExtensionAPI): void {
         results.push(
           await selectUnresolved(
             ctx,
-            await deliberate(ctx, config, request, signal),
+            await dependencies.deliberateDecision(
+              ctx,
+              config,
+              request,
+              signal,
+            ),
           ),
         );
       }
@@ -232,15 +258,16 @@ export default function quorumExtension(pi: ExtensionAPI): void {
     warnedInvalidReviewConfig = false;
     if (automaticFixPending) {
       automaticFixPending = false;
-      lastReviewedFingerprint = (await collectGitChanges(pi)).fingerprint;
+      lastReviewedFingerprint = (await dependencies.collectChanges(pi))
+        .fingerprint;
       return;
     }
-    const changes = await collectGitChanges(pi);
+    const changes = await dependencies.collectChanges(pi);
     if (!changes.patch || changes.fingerprint === lastReviewedFingerprint)
       return;
     if (
       failedReview?.fingerprint === changes.fingerprint &&
-      Date.now() < failedReview.retryAfter
+      dependencies.now() < failedReview.retryAfter
     )
       return;
     reviewInFlight = true;
@@ -255,7 +282,7 @@ export default function quorumExtension(pi: ExtensionAPI): void {
           new DOMException("Automatic quorum review timed out", "AbortError"),
         );
       },
-      REVIEW_TIMEOUT_MS,
+      dependencies.reviewTimeoutMs,
     );
     const stopListening = canCancelInteractively
       ? ctx.ui.onTerminalInput((data) => {
@@ -279,7 +306,7 @@ export default function quorumExtension(pi: ExtensionAPI): void {
       "info",
     );
     try {
-      const parts = splitDiffForReview(changes.patch);
+      const parts = dependencies.splitDiff(changes.patch);
       const results: DecisionResult[] = [];
       for (const [index, part] of parts.entries()) {
         reviewController.signal.throwIfAborted();
@@ -288,7 +315,7 @@ export default function quorumExtension(pi: ExtensionAPI): void {
           `reviewing changes ${index + 1}/${parts.length}${canCancelInteractively ? " (Ctrl-C to cancel)" : ""}`,
         );
         results.push(
-          await deliberate(
+          await dependencies.deliberateDecision(
             ctx,
             { ...config, maxRounds: config.review.maxRounds },
             {
@@ -321,7 +348,8 @@ export default function quorumExtension(pi: ExtensionAPI): void {
         if (reviewTimedOut) {
           failedReview = {
             fingerprint: changes.fingerprint,
-            retryAfter: Date.now() + REVIEW_FAILURE_RETRY_MS,
+            retryAfter:
+              dependencies.now() + dependencies.reviewFailureRetryMs,
           };
         } else {
           lastReviewedFingerprint = changes.fingerprint;
@@ -339,7 +367,7 @@ export default function quorumExtension(pi: ExtensionAPI): void {
       }
       failedReview = {
         fingerprint: changes.fingerprint,
-        retryAfter: Date.now() + REVIEW_FAILURE_RETRY_MS,
+        retryAfter: dependencies.now() + dependencies.reviewFailureRetryMs,
       };
       ctx.ui.notify(
         "Automatic quorum review failed. The same change set will not be retried for five minutes.",

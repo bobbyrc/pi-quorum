@@ -45,10 +45,18 @@ test("puts the full selected option in model-visible content", () => {
     assert.match(text, /Selected direction:/);
     assert.match(text, /It is local and durable/);
 });
+test("preserves an unknown selected option id instead of hiding the choice", () => {
+    const result = unresolvedResult();
+    result.selectedOptionId = "external-direction";
+    assert.match(formatDecisionResult(result), /Selected direction: external-direction/);
+});
 test("puts each reviewer's actionable report in follow-up content", () => {
     const result = unresolvedResult();
+    result.reports[0].options = result.options;
     const text = formatReviewResults([result]);
     assert.match(text, /one\/model.*Use SQLite/);
     assert.match(text, /two\/model.*Use Postgres/);
     assert.match(text, /Regression risk/);
+    assert.match(text, /Suggested directions:/);
+    assert.match(text, /sqlite: Use SQLite/);
 });
